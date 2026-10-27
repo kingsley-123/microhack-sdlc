@@ -110,15 +110,57 @@ def test_search_treats_wildcards_as_literal_characters(client: TestClient) -> No
     assert [product["productId"] for product in underscore_response.json()] == [literal_match_id]
 
 
+def test_search_treats_backslashes_and_sql_looking_input_as_literals(
+    client: TestClient,
+) -> None:
+    supplier_id = create_supplier(client, "Literal Search Supplier")
+    backslash_match_id = create_product(
+        client,
+        supplier_id,
+        "Backslash\\MarkerSearchProbe",
+        "BACKSLASH-SEARCH-001",
+    )
+    sql_looking_match_id = create_product(
+        client,
+        supplier_id,
+        "Literal ' OR 1=1 -- Search Probe",
+        "SQL-LOOKING-002",
+    )
+    create_product(client, supplier_id, "Unrelated Search Product", "SAFE-003")
+
+    backslash_response = client.get(
+        "/api/products",
+        params={"search": "\\MarkerSearchProbe"},
+    )
+    sql_looking_response = client.get(
+        "/api/products",
+        params={"search": "' OR 1=1 --"},
+    )
+
+    assert [product["productId"] for product in backslash_response.json()] == [backslash_match_id]
+    assert [product["productId"] for product in sql_looking_response.json()] == [
+        sql_looking_match_id
+    ]
+
+
 def test_no_matches_and_supplier_validation(client: TestClient) -> None:
     supplier_id = create_supplier(client, "Validation Search Supplier")
 
     no_matches_response = client.get("/api/products", params={"search": "no-such-product"})
     invalid_supplier_response = client.get("/api/products", params={"supplier_id": 0})
+    negative_supplier_response = client.get("/api/products", params={"supplier_id": -1})
+    malformed_supplier_response = client.get(
+        "/api/products",
+        params={"supplier_id": "not-an-integer"},
+    )
+    fractional_supplier_response = client.get("/api/products", params={"supplier_id": 1.5})
     missing_supplier_response = client.get("/api/products", params={"supplier_id": 9999})
 
     assert no_matches_response.status_code == 200
     assert no_matches_response.json() == []
     assert invalid_supplier_response.status_code == 400
+    assert negative_supplier_response.status_code == 400
+    assert malformed_supplier_response.status_code == 422
+    assert fractional_supplier_response.status_code == 422
     assert missing_supplier_response.status_code == 404
     assert client.get("/api/products", params={"supplier_id": supplier_id}).json() == []

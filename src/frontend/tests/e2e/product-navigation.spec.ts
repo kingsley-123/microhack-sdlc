@@ -130,6 +130,93 @@ test.describe('Product catalog discovery', () => {
     await expect(page.locator('h3:has-text("AutoClean Litter Dome")')).toBeVisible();
   });
 
+  test('Product added from filtered results remains in the cart after filters clear', async ({
+    page,
+  }) => {
+    type TestCartItem = {
+      productId: number;
+      name: string;
+      description: string;
+      sku: string;
+      unit: string;
+      imgName: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+    };
+    const cart = {
+      cartId: 'filtered-search-cart',
+      items: [] as TestCartItem[],
+      total: 0,
+    };
+
+    await page.route('**/api/carts**', async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+
+      if (request.method() === 'POST' && pathname === '/api/carts') {
+        return route.fulfill({ status: 201, json: cart });
+      }
+      if (request.method() === 'GET' && pathname === `/api/carts/${cart.cartId}`) {
+        return route.fulfill({ json: cart });
+      }
+      if (request.method() === 'POST' && pathname.endsWith('/items')) {
+        const { productId, quantity } = request.postDataJSON() as {
+          productId: number;
+          quantity: number;
+        };
+        const product = products.find((candidate) => candidate.productId === productId);
+        if (!product) {
+          return route.fulfill({ status: 404 });
+        }
+
+        const existingItem = cart.items.find((item) => item.productId === productId);
+        const nextQuantity = (existingItem?.quantity ?? 0) + quantity;
+        const unitPrice = Math.round(product.price * (1 - product.discount) * 100) / 100;
+        const nextItem: TestCartItem = {
+          productId,
+          name: product.name,
+          description: product.description,
+          sku: product.sku,
+          unit: product.unit,
+          imgName: product.imgName,
+          quantity: nextQuantity,
+          unitPrice,
+          lineTotal: Math.round(unitPrice * nextQuantity * 100) / 100,
+        };
+        cart.items = [
+          ...cart.items.filter((item) => item.productId !== productId),
+          nextItem,
+        ];
+        cart.total = cart.items.reduce((total, item) => total + item.lineTotal, 0);
+        return route.fulfill({ json: cart });
+      }
+
+      return route.fulfill({ status: 404 });
+    });
+
+    await page.goto('/products');
+    await page.getByRole('combobox', { name: 'Filter by supplier' }).selectOption('2');
+    await page.getByRole('textbox', { name: 'Search products' }).fill('SmartFeeder Mini');
+    await expect(page.locator('h3:has-text("SmartFeeder Mini")')).toBeVisible();
+    await expect(page.locator('h3:has-text("SmartFeeder One")')).toHaveCount(0);
+
+    const productName = 'SmartFeeder Mini';
+    await page.getByRole('button', { name: `Increase quantity of ${productName}` }).click();
+    await page.getByRole('button', { name: `Increase quantity of ${productName}` }).click();
+    await page.getByRole('button', { name: `Add 2 ${productName} to cart` }).click();
+    await expect(page.getByRole('status')).toContainText('Product added to your cart.');
+
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await expect(page.locator('h3:has-text("SmartFeeder One")')).toBeVisible();
+    await expect(page.locator('h3:has-text("SmartFeeder Mini")')).toBeVisible();
+
+    await page.locator('nav').getByRole('link', { name: 'Cart' }).click();
+    await expect(page.getByTestId('cart-item-2')).toContainText(productName);
+    await expect(page.getByTestId('cart-quantity-2')).toHaveText('2');
+    await expect(page.getByTestId('cart-total')).toHaveText('$179.98');
+  });
+
   test('Search for a product with no matches', async ({ page }) => {
     // Given I am viewing the product catalog
     await page.goto('/products');
