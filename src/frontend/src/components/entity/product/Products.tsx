@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { useQuery } from 'react-query';
+import { useMutation, useQuery, useQueryClient } from 'react-query';
 import { api } from '../../../api/config';
+import { addCartItem } from '../../../api/cartApi';
 import { useTheme } from '../../../context/ThemeContext';
 
 interface Product {
@@ -28,6 +29,10 @@ export default function Products() {
   const [showModal, setShowModal] = useState(false);
   const { data: products, isLoading, error } = useQuery('products', fetchProducts);
   const { darkMode } = useTheme();
+  const queryClient = useQueryClient();
+  const addToCartMutation = useMutation(addCartItem, {
+    onSuccess: () => queryClient.invalidateQueries('cart'),
+  });
 
   const filteredProducts = products?.filter(
     (product) =>
@@ -52,12 +57,16 @@ export default function Products() {
   const handleAddToCart = (productId: number) => {
     const quantity = quantities[productId] || 0;
     if (quantity > 0) {
-      // TODO: Implement cart functionality
-      alert(`Added ${quantity} items to cart`);
-      setQuantities((prev) => ({
-        ...prev,
-        [productId]: 0,
-      }));
+      addToCartMutation.mutate(
+        { productId, quantity },
+        {
+          onSuccess: () =>
+            setQuantities((prev) => ({
+              ...prev,
+              [productId]: 0,
+            })),
+        },
+      );
     }
   };
 
@@ -254,6 +263,16 @@ export default function Products() {
               );
             })}
           </div>
+          {addToCartMutation.isError && (
+            <p className="text-red-600" role="alert">
+              Could not add this product to your cart. Please try again.
+            </p>
+          )}
+          {addToCartMutation.isSuccess && (
+            <p className="text-green-700" role="status">
+              Product added to your cart.
+            </p>
+          )}
         </div>
       </div>
 
