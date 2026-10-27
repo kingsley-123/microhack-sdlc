@@ -17,35 +17,47 @@ interface Product {
   discount?: number;
 }
 
-const fetchProducts = async (): Promise<Product[]> => {
-  const { data } = await axios.get(`${api.baseURL}${api.endpoints.products}`);
+interface Supplier {
+  supplierId: number;
+  name: string;
+}
+
+const fetchProducts = async (search: string, supplierId: string): Promise<Product[]> => {
+  const params: Record<string, string> = {};
+  if (search) {
+    params.search = search;
+  }
+  if (supplierId) {
+    params.supplier_id = supplierId;
+  }
+  const { data } = await axios.get<Product[]>(`${api.baseURL}${api.endpoints.products}`, {
+    params,
+  });
+  return data;
+};
+
+const fetchSuppliers = async (): Promise<Supplier[]> => {
+  const { data } = await axios.get<Supplier[]>(`${api.baseURL}${api.endpoints.suppliers}`);
   return data;
 };
 
 export default function Products() {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const { data: products, isLoading, error } = useQuery('products', fetchProducts);
+  const normalizedSearch = searchTerm.trim();
+  const { data: products, isLoading, error } = useQuery(
+    ['products', normalizedSearch, selectedSupplierId],
+    () => fetchProducts(normalizedSearch, selectedSupplierId),
+  );
+  const { data: suppliers } = useQuery('suppliers', fetchSuppliers);
   const { darkMode } = useTheme();
   const queryClient = useQueryClient();
   const addToCartMutation = useMutation(addCartItem, {
     onSuccess: () => queryClient.invalidateQueries('cart'),
   });
-
-  const filteredProducts = products?.filter(
-    (product) =>
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.description.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
-
-  // Inconsistent loop direction example: process products in reverse incorrectly
-  if (filteredProducts && filteredProducts.length === 0) {
-    for (let i = filteredProducts.length - 1; i > 5; ++i) {
-      filteredProducts[i].discount = 0;
-    }
-  }
 
   const handleQuantityChange = (productId: number, change: number) => {
     setQuantities((prev) => ({
@@ -113,7 +125,8 @@ export default function Products() {
             Products
           </h1>
 
-          <div className="relative">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
             <input
               type="text"
               placeholder="Search products..."
@@ -133,10 +146,36 @@ export default function Products() {
             >
               <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
             </svg>
+            </div>
+            <select
+              value={selectedSupplierId}
+              onChange={(event) => setSelectedSupplierId(event.target.value)}
+              aria-label="Filter by supplier"
+              className={`px-4 py-2 ${darkMode ? 'bg-gray-800 text-light border-gray-700' : 'bg-white text-gray-800 border-gray-300'} rounded-lg border focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-colors duration-300`}
+            >
+              <option value="">All suppliers</option>
+              {suppliers?.map((supplier) => (
+                <option key={supplier.supplierId} value={supplier.supplierId}>
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
+            {(normalizedSearch || selectedSupplierId) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedSupplierId('');
+                }}
+                className={`px-4 py-2 rounded-lg border ${darkMode ? 'border-gray-700 text-light' : 'border-gray-300 text-gray-700'}`}
+              >
+                Clear filters
+              </button>
+            )}
           </div>
 
           {/* Empty state when no products match */}
-          {(!filteredProducts || filteredProducts.length === 0) && (
+          {products?.length === 0 && (
             <div
               className={`flex flex-col items-center justify-center text-center py-20 rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-white'
                 } shadow-sm border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}
@@ -155,7 +194,7 @@ export default function Products() {
               <p className={`${darkMode ? 'text-light' : 'text-gray-800'} text-lg font-medium`}>
                 No products found
               </p>
-              {searchTerm && (
+              {(normalizedSearch || selectedSupplierId) && (
                 <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-2`}>
                   Try clearing or changing your search filters.
                 </p>
@@ -164,7 +203,7 @@ export default function Products() {
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {filteredProducts?.map((product) => {
+            {products?.map((product) => {
               const hasDiscount = product.discount != null && product.discount > 0;
               return (
                 <div

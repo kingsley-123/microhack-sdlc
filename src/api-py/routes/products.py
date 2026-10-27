@@ -4,15 +4,28 @@ from fastapi import APIRouter
 
 from models.product import CreateProductRequest, Product, UpdateProductRequest
 from repositories.products import ProductsRepository
+from repositories.suppliers import SuppliersRepository
 from utils.errors import NotFoundException, ValidationException
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
 repository = ProductsRepository()
+suppliers_repository = SuppliersRepository()
 
 
 @router.get("", response_model=list[Product])
-async def get_all() -> list[Product]:
-    return await repository.find_all()
+async def get_all(search: str | None = None, supplier_id: int | None = None) -> list[Product]:
+    normalized_search = search.strip() if search else None
+    if normalized_search == "":
+        normalized_search = None
+
+    if supplier_id is not None:
+        if supplier_id <= 0:
+            raise ValidationException("supplier_id must be a positive integer")
+        supplier = await suppliers_repository.find_by_id(supplier_id)
+        if supplier is None:
+            raise NotFoundException("Supplier", supplier_id)
+
+    return await repository.find_all(normalized_search, supplier_id)
 
 
 @router.get("/{product_id}", response_model=Product)

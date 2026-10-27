@@ -11,7 +11,62 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Product catalog discovery', () => {
+  const suppliers = [
+    { supplierId: 1, name: 'Feline Supply Co' },
+    { supplierId: 2, name: 'Whisker Works' },
+  ];
+  const products = [
+    {
+      productId: 1,
+      supplierId: 1,
+      name: 'SmartFeeder One',
+      description: 'AI-powered feeder learns nap cycles and mealtime habits.',
+      price: 129.99,
+      discount: 0.25,
+      sku: 'CAT-FEED-001',
+      unit: 'piece',
+      imgName: 'feeder.png',
+    },
+    {
+      productId: 2,
+      supplierId: 2,
+      name: 'SmartFeeder Mini',
+      description: 'Compact feeder for small cats.',
+      price: 89.99,
+      discount: 0,
+      sku: 'CAT-FEED-002',
+      unit: 'piece',
+      imgName: 'feeder.png',
+    },
+    {
+      productId: 3,
+      supplierId: 2,
+      name: 'AutoClean Litter Dome',
+      description: 'A self-cleaning litter box.',
+      price: 199.99,
+      discount: 0.25,
+      sku: 'CAT-LITTER-001',
+      unit: 'piece',
+      imgName: 'litter-box.png',
+    },
+  ];
+
   test.beforeEach(async ({ page }) => {
+    await page.route('**/api/suppliers', (route) => route.fulfill({ json: suppliers }));
+    await page.route('**/api/products**', (route) => {
+      const requestUrl = new URL(route.request().url());
+      const search = requestUrl.searchParams.get('search')?.trim().toLowerCase() || '';
+      const supplierId = requestUrl.searchParams.get('supplier_id');
+      const filteredProducts = products.filter((product) => {
+        const matchesSearch =
+          !search ||
+          product.name.toLowerCase().includes(search) ||
+          product.sku.toLowerCase().includes(search);
+        const matchesSupplier = !supplierId || product.supplierId === Number(supplierId);
+        return matchesSearch && matchesSupplier;
+      });
+      return route.fulfill({ json: filteredProducts });
+    });
     // Navigate away from about:blank so localStorage context is available
     await page.goto('/');
   });
@@ -31,7 +86,7 @@ test.describe('Product catalog discovery', () => {
     await expect(page.locator('h1:has-text("Products")')).toBeVisible();
   });
 
-  test('Search for a product by name', async ({ page }) => {
+  test('Search by product name and SKU', async ({ page }) => {
     // Given I am viewing the product catalog
     await page.goto('/products');
     await expect(page.locator('h1:has-text("Products")')).toBeVisible();
@@ -52,15 +107,33 @@ test.describe('Product catalog discovery', () => {
     // And the product description is visible in the results
     const description = page.locator('text=/AI-powered feeder.*nap cycles/i').first();
     await expect(description).toBeVisible();
+
+    await searchInput.fill('cat-feed-001');
+    await expect(productCard).toBeVisible();
+    await expect(page.locator('h3:has-text("SmartFeeder Mini")')).toHaveCount(0);
+  });
+
+  test('Filter by supplier, combine filters, and clear them', async ({ page }) => {
+    await page.goto('/products');
+    const supplierFilter = page.getByRole('combobox', { name: 'Filter by supplier' });
+    await supplierFilter.selectOption('2');
+
+    await expect(page.locator('h3:has-text("SmartFeeder Mini")')).toBeVisible();
+    await expect(page.locator('h3:has-text("SmartFeeder One")')).toHaveCount(0);
+
+    await page.getByRole('textbox', { name: 'Search products' }).fill('SmartFeeder');
+    await expect(page.locator('h3:has-text("SmartFeeder Mini")')).toBeVisible();
+    await expect(page.locator('h3:has-text("AutoClean Litter Dome")')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await expect(page.locator('h3:has-text("SmartFeeder One")')).toBeVisible();
+    await expect(page.locator('h3:has-text("AutoClean Litter Dome")')).toBeVisible();
   });
 
   test('Search for a product with no matches', async ({ page }) => {
     // Given I am viewing the product catalog
     await page.goto('/products');
     await expect(page.locator('h1:has-text("Products")')).toBeVisible();
-
-    // Wait for initial products to load
-    await expect(page.locator('div[class*="grid"]').first()).toBeVisible();
 
     // When I search for "Space Tuna"
     const searchInput = page.locator('input[aria-label="Search products"]');
